@@ -13,4 +13,5 @@ type CloudControllerClient interface {
 	RunTask(appGUID string, command string) (ccv3.Task, ccv3.Warnings, error)
 	GetApplications(query url.Values) ([]ccv3.Application, ccv3.Warnings, error)
 	GetApplicationTasks(appGUID string, query url.Values) ([]ccv3.Task, ccv3.Warnings, error)
+	UpdateTask(taskGUID string) (ccv3.Task, ccv3.Warnings, error)
 }
