@@ -13,9 +13,7 @@ import (
 	"text/tabwriter"
 
 	"code.cloudfoundry.org/cli/utils/configv3"
-
 	"github.com/fatih/color"
-
 	"github.com/nicksnyder/go-i18n/i18n"
 	"github.com/vito/go-interact/interact"
 )
@@ -36,7 +34,6 @@ const (
 type Config interface {
 	// ColorEnabled enables or disabled color
 	ColorEnabled() configv3.ColorSetting
-
 	// Locale is the language to translate the output to
 	Locale() string
 }
@@ -55,16 +52,13 @@ type TranslatableError interface {
 type UI struct {
 	// In is the input buffer
 	In io.Reader
-
 	// Out is the output buffer
 	Out io.Writer
-
 	// Err is the error buffer
 	Err io.Writer
 
 	colorEnabled configv3.ColorSetting
-
-	translate i18n.TranslateFunc
+	translate    i18n.TranslateFunc
 }
 
 // NewUI will return a UI object where Out is set to STDOUT, In is set to STDIN,
@@ -96,6 +90,34 @@ func NewTestUI(in io.Reader, out io.Writer, err io.Writer) *UI {
 	}
 }
 
+// TranslateText returns the translated string with templateValues substituted into the
+// template string.
+func (ui *UI) TranslateText(stringTemplate string, templateValues ...map[string]interface{}) string {
+	return ui.translate(stringTemplate, getFirstSet(templateValues))
+}
+
+// DisplayOK outputs a green translated "OK" message to UI.Out.
+func (ui *UI) DisplayOK() {
+	fmt.Fprintf(ui.Out, "%s\n", ui.colorize(ui.TranslateText("OK"), green, true))
+}
+
+// DisplayNewline outputs a newline to UI.Out.
+func (ui *UI) DisplayNewline() {
+	fmt.Fprintf(ui.Out, "\n")
+}
+
+// DisplayBoolPrompt outputs the prompt and waits for user input. It only
+// allows for a boolean response. A default boolean response can be set with
+// defaultResponse.
+func (ui *UI) DisplayBoolPrompt(prompt string, defaultResponse bool) (bool, error) {
+	response := defaultResponse
+	interactivePrompt := interact.NewInteraction(fmt.Sprintf("%s%s", prompt, ui.colorize(">>", cyan, true)))
+	interactivePrompt.Input = ui.In
+	interactivePrompt.Output = ui.Out
+	err := interactivePrompt.Resolve(&response)
+	return response, err
+}
+
 // DisplayTable presents a two dimensional array of strings as a table to UI.Out
 func (ui *UI) DisplayTable(prefix string, table [][]string, padding int) error {
 	tw := tabwriter.NewWriter(ui.Out, 0, 1, padding, ' ', 0)
@@ -108,114 +130,72 @@ func (ui *UI) DisplayTable(prefix string, table [][]string, padding int) error {
 	return tw.Flush()
 }
 
-// DisplayText combines the formattedString template with the key maps and then
-// outputs it to the UI.Out file. Prior to outputting the formattedString, it
+// DisplayText combines the stringTemplate template with the key maps and then
+// outputs it to the UI.Out file. Prior to outputting the stringTemplate, it
 // is run through an internationalization function to translate it to a
-// pre-configured language. Only the first map in keys is used.
-func (ui *UI) DisplayText(formattedString string, keys ...map[string]interface{}) {
-	translatedValue := ui.translate(formattedString, ui.templateValuesFromKeys(keys))
-	fmt.Fprintf(ui.Out, "%s\n", translatedValue)
+// pre-configured language. Only the first map in templateValues is used.
+func (ui *UI) DisplayText(stringTemplate string, templateValues ...map[string]interface{}) {
+	fmt.Fprintf(ui.Out, "%s\n", ui.TranslateText(stringTemplate, templateValues...))
 }
 
-// DisplayTextWithKeyTranslations translates the keys listed in
+// DisplayTextWithKeyTranslations translates the templateValues listed in
 // keysToTranslate, and then passes these values to DisplayText. Only the first
-// map in keys is used.
-func (ui *UI) DisplayTextWithKeyTranslations(formattedString string, keysToTranslate []string, keys ...map[string]interface{}) {
-	templateValues := ui.templateValuesFromKeys(keys)
+// map in templateValues is used.
+func (ui *UI) DisplayTextWithKeyTranslations(stringTemplate string, keysToTranslate []string, templateValues ...map[string]interface{}) {
+	firstTemplateValues := getFirstSet(templateValues)
 	for _, key := range keysToTranslate {
-		templateValues[key] = ui.translate(templateValues[key].(string))
+		firstTemplateValues[key] = ui.TranslateText(fmt.Sprint(firstTemplateValues[key]))
 	}
-	fmt.Fprintf(ui.Out, "%s\n", ui.translate(formattedString, templateValues))
+	fmt.Fprintf(ui.Out, "%s\n", ui.TranslateText(stringTemplate, firstTemplateValues))
 }
 
-// DisplayNewline outputs a newline to UI.Out.
-func (ui *UI) DisplayNewline() {
-	fmt.Fprintf(ui.Out, "\n")
-}
-
-// DisplayPair outputs the "attribute: formattedString" pair to UI.Out. keys
-// are applied to the translation of formattedString, while attribute is
+// DisplayPair outputs the "attribute: stringTemplate" pair to UI.Out. templateValues
+// are applied to the translation of stringTemplate, while attribute is
 // translated directly.
-func (ui *UI) DisplayPair(attribute string, formattedString string, keys ...map[string]interface{}) {
-	translatedValue := ui.translate(formattedString, ui.templateValuesFromKeys(keys))
-	fmt.Fprintf(ui.Out, "%s: %s\n", ui.translate(attribute), translatedValue)
-}
-
-// DisplayBoolPrompt outputs the prompt and waits for user input. It only
-// allows for a boolean response. A default boolean response can be set with
-// defaultResponse.
-func (ui *UI) DisplayBoolPrompt(prompt string, defaultResponse bool) (bool, error) {
-	response := defaultResponse
-	fullPrompt := fmt.Sprintf("%s%s", prompt, ui.colorize(">>", cyan, true))
-	interactivePrompt := interact.NewInteraction(fullPrompt)
-	interactivePrompt.Input = ui.In
-	interactivePrompt.Output = ui.Out
-	err := interactivePrompt.Resolve(&response)
-	return response, err
+func (ui *UI) DisplayPair(attribute string, stringTemplate string, templateValues ...map[string]interface{}) {
+	fmt.Fprintf(ui.Out, "%s: %s\n", ui.TranslateText(attribute), ui.TranslateText(stringTemplate, templateValues...))
 }
 
 // DisplayHelpHeader translates and then bolds the help header. Sends output to
 // UI.Out.
 func (ui *UI) DisplayHelpHeader(text string) {
-	fmt.Fprintf(ui.Out, "%s\n", ui.colorize(ui.translate(text), defaultFgColor, true))
+	fmt.Fprintf(ui.Out, "%s\n", ui.colorize(ui.TranslateText(text), defaultFgColor, true))
 }
 
-// DisplayHeaderFlavorText outputs the translated text, with cyan color keys,
+// DisplayHeaderFlavorText outputs the translated text, with cyan color templateValues,
 // to UI.Out.
-func (ui *UI) DisplayHeaderFlavorText(formattedString string, keys ...map[string]interface{}) {
-	templateValues := ui.templateValuesFromKeys(keys)
-	for key, value := range templateValues {
-		templateValues[key] = ui.colorize(fmt.Sprint(value), cyan, true)
+func (ui *UI) DisplayHeaderFlavorText(stringTemplate string, templateValues ...map[string]interface{}) {
+	firstTemplateValues := getFirstSet(templateValues)
+	for key, value := range firstTemplateValues {
+		firstTemplateValues[key] = ui.colorize(fmt.Sprint(value), cyan, true)
 	}
-
-	translatedValue := ui.translate(formattedString, templateValues)
-	fmt.Fprintf(ui.Out, "%s\n", translatedValue)
+	fmt.Fprintf(ui.Out, "%s\n", ui.TranslateText(stringTemplate, firstTemplateValues))
 }
 
-// DisplayOK outputs a green translated "OK" message to UI.Out.
-func (ui *UI) DisplayOK() {
-	translatedFormatString := ui.translate("OK", nil)
-	fmt.Fprintf(ui.Out, "%s\n", ui.colorize(translatedFormatString, green, true))
-}
-
-// DisplayError outputs the error to UI.Err and outputs a red translated
-// "FAILED" to UI.Out.
-func (ui *UI) DisplayError(err error) {
-	if translatableError, ok := err.(TranslatableError); ok {
-		fmt.Fprintf(ui.Err, "%s\n", translatableError.Translate(ui.translate))
-	} else {
-		fmt.Fprintf(ui.Err, "%s\n", err.Error())
-	}
-
-	translatedFormatString := ui.translate("FAILED", nil)
-	fmt.Fprintf(ui.Out, "%s\n", ui.colorize(translatedFormatString, red, true))
-}
-
-// DisplayWarning applies translation to formattedString and displays the
+// DisplayWarning applies translation to stringTemplate and displays the
 // translated warning to UI.Err.
-func (ui *UI) DisplayWarning(formattedString string, keys ...map[string]interface{}) {
-	translatedValue := ui.translate(formattedString, ui.templateValuesFromKeys(keys))
-	fmt.Fprintf(ui.Err, "%s\n", translatedValue)
+func (ui *UI) DisplayWarning(stringTemplate string, templateValues ...map[string]interface{}) {
+	fmt.Fprintf(ui.Err, "%s\n", ui.TranslateText(stringTemplate, templateValues...))
 }
 
 // DisplayWarnings translates and displays the warnings.
 func (ui *UI) DisplayWarnings(warnings []string) {
 	for _, warning := range warnings {
-		fmt.Fprintf(ui.Err, "%s\n", ui.translate(warning, nil))
+		fmt.Fprintf(ui.Err, "%s\n", ui.TranslateText(warning))
 	}
 }
 
-// TranslateText returns the translated string with keys substituted into the
-// template string.
-func (ui *UI) TranslateText(formattedString string, keys ...map[string]interface{}) string {
-	return ui.translate(formattedString, ui.templateValuesFromKeys(keys))
-}
-
-func (ui *UI) templateValuesFromKeys(keys []map[string]interface{}) map[string]interface{} {
-	if len(keys) > 0 {
-		return keys[0]
+// DisplayError outputs the error to UI.Err and outputs a red translated
+// "FAILED" to UI.Out.
+func (ui *UI) DisplayError(err error) {
+	errMsg := ""
+	if translatableError, ok := err.(TranslatableError); ok {
+		errMsg = translatableError.Translate(ui.translate)
+	} else {
+		errMsg = err.Error()
 	}
-	return map[string]interface{}{}
+	fmt.Fprintf(ui.Err, "%s\n", errMsg)
+	fmt.Fprintf(ui.Out, "%s\n", ui.colorize(ui.TranslateText("FAILED"), red, true))
 }
 
 func (ui *UI) colorize(message string, textColor color.Attribute, bold bool) string {
@@ -232,4 +212,11 @@ func (ui *UI) colorize(message string, textColor color.Attribute, bold bool) str
 	}
 	f := colorPrinter.SprintFunc()
 	return f(message)
+}
+
+func getFirstSet(list []map[string]interface{}) map[string]interface{} {
+	if list == nil || len(list) == 0 {
+		return map[string]interface{}{}
+	}
+	return list[0]
 }
